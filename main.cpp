@@ -48,16 +48,6 @@ float thresh = 50;
 
 void getSuperPixels();
 
-bool isGreen(int x, int y)
-{
-    return green.at<char>(y,x);
-}
-
-bool isWhite(int x, int y)
-{
-    return white.at<char>(y,x);
-}
-
 cv::Point intersection( const std::vector<float> &line1, const std::vector<float> &line2 )
 {
     cv::Point ret(-1,-1);
@@ -103,177 +93,12 @@ float distance( cv::Point pt, std::vector<float> &line )
     return (normvec.x*toYSection.x + normvec.y*toYSection.y)/sqrt(line[0]*line[0]+1);
 }
 
-int getInliers( const std::vector<cv::Point> pts, std::vector<size_t> &inliers, cv::Point2f &line )
-{
-    int inlierCnt = 0;
-    inliers.clear();
-    
-    if( line.x == 0 && line.y == 0 )
-        return inlierCnt;
-    
-    for (int i = 0; i < pts.size(); i++) {
-        if( abs(distance(pts[i], line)) < 2 )
-        {
-            inlierCnt++;
-            inliers.push_back(i);
-        }
-    }
-    
-    return inlierCnt;
-}
-
-std::vector<float> RANSAC( std::vector<cv::Point> &pts, std::vector<size_t> &inliers )
-{
-    size_t numCand = pts.size() * 10;
-    
-    std::vector<std::vector<bool> > picked( pts.size(), std::vector<bool>(pts.size(), false ) );
-    
-    std::vector<cv::Point2f> candidates;
-    
-    for (int i = 0; i < numCand; i++) {
-        int idx1 = rand() % pts.size();
-        int idx2 = rand() % pts.size();
-        
-        if (!picked[idx1][idx2] && !picked[idx2][idx1]) {
-            candidates.push_back(getCandidate(pts[idx1], pts[idx2]));
-            picked[idx1][idx2] = picked[idx2][idx1] = true;
-        }
-    }
-    
-    inliers.clear();
-    std::vector<float> bestLine;
-    int bestInliers = 0;
-    
-    std::vector<float> ret(2,0);
-    
-    for (int i = 0; i < candidates.size(); i++) {
-        
-        std::vector<size_t> currInliers;
-        int curr = getInliers(pts, currInliers, candidates[i]);
-        
-        if (curr > bestInliers) {
-            bestInliers = curr;
-            inliers = currInliers;
-            ret[0] = candidates[i].x;
-            ret[1] = candidates[i].y;
-            /*std::cout << curr << std::endl;
-            
-            for (int i = 0; i < pts.size(); i++) {
-                cv::circle(imageDisp, pts[i], 5, cv::Scalar(0,0,255));
-            }
-            for (int i = 0; i < inliers.size(); i++) {
-                cv::circle(imageDisp, pts[inliers[i]], 5, cv::Scalar(0,255,0));
-            }
-            
-            cv::line(imageDisp, cv::Point(0,ret[1]), cv::Point(640,640*ret[0]+ret[1]), cv::Scalar(255,0,0));
-            cv::imshow("imageDisp", imageDisp);
-            cv::waitKey();*/
-        }
-        
-    }
-    
-    return ret;
-}
-
-cv::Point raySearchSoccerHorizonBottomUp(cv::Mat &pImg, int x)
-{
-    int yd = -1;
-    
-    int xx = x;
-    int yy = pImg.rows - 1;
-    
-    cv::Point last_edge = cv::Point(-1, -1);
-    
-    do
-    {
-        //Current pixel
-        if (isGreen(xx,yy))
-        {
-            last_edge = cv::Point(xx, yy);
-        }
-        
-        if (!isGreen(xx,yy) && !isWhite(xx,yy))
-        {
-            return last_edge;
-        }
-        
-        yy += yd;
-    } while (yy != 0 && yy != pImg.rows);
-    
-    return cv::Point(xx, yy);
-}
-
 void FindHorizon(cv::Mat &pImg)
 {
     
     int _nx = pImg.cols;
     int _ny = pImg.rows;
     std::vector<float> line1 = {-1,-1}, line2 = {-1,-1};
-    /*int nx_col_dist = _nx / 30;
-    
-    std::vector<cv::Point> pts;
-    for (int x = 0; x < _nx; x += nx_col_dist)
-    {
-        cv::Point hEdge = raySearchSoccerHorizonBottomUp(pImg, x);
-        if (hEdge.x != -1 && hEdge.y != -1 && hEdge.y < (_ny - 10))
-        {
-            pts.push_back(hEdge);
-            //cv::circle(image, hEdge, 5, cv::Scalar(0,0,255));
-        }
-    }
-    
-    //RANSAC the points into two lines
-    if (pts.empty()) {
-        return;
-    }
-    
-    std::vector<size_t> inliers;
-    //get the first line
-    std::vector<float> line1 = RANSAC(pts, inliers);
-    size_t line1_nInliers = inliers.size();
-    
-    if( line1_nInliers == 0)
-        return;
-    
-    for (size_t i = inliers.size()-1; ; i--) {
-        pts.erase(pts.begin() + inliers[i] );
-        if (i==0) {
-            break;
-        }
-    }
-    
-    inliers.clear();
-    //get the potential second line
-    std::vector<float> line2 = RANSAC(pts, inliers);
-    size_t line2_nInliers = inliers.size();
-    
-    
-    //Sanity Checks
-    cv::Point lhp,rhp,chp;
-    
-    //Minimum points needed for a line
-    if (line1_nInliers <= 5) {
-        line1.clear();
-    }
-    if (line2_nInliers <= 5) {
-        line2.clear();
-    }
-    
-    float thresh = 0.f;
-    
-    if (!line1.empty())
-    {
-        thresh = 60;
-        if (!line2.empty())
-        {
-            cv::Point inter = intersection(line1, line2);
-            if (!(inter.x >= 0 && inter.x < _nx &&
-                inter.y >= 0 && inter.y < _ny))
-            {
-                line2.clear();
-            }
-        }
-    }*/
     
     if (pts.size() >= 2) {
         cv::Point2f templine = getCandidate(pts[0], pts[1]);
@@ -464,7 +289,6 @@ void on_trackbar_flood( int , void* )
 
 static void onMouse( int event, int x, int y, int, void* )
 {
-    
     switch( event )
     {
         case cv::EVENT_LBUTTONDOWN:
@@ -537,6 +361,7 @@ static void onMouse( int event, int x, int y, int, void* )
             /*cv::line(maskDisp, pts.back(), currPt, colours[selected], thickness+1);
             cv::line(mask, pts.back(), currPt, selected, thickness+1);*/
         }
+        std::cout << "got here" << std::endl;
         cv::circle(imageDisp, currPt, 3, colours[selected]);
         pts.push_back(currPt);
     }
@@ -706,13 +531,26 @@ int main(int argc, char *argv[])
     get_all(imageDir, ".png", files);
     std::sort( files.begin(), files.end(), mysort() );
     
+    bool horizonMode = false;
+    if (argc == 3 && std::string(argv[2]) == std::string("--horizon")) {
+        horizonMode = true;
+    }
+    
     cv::namedWindow("image",cv::WINDOW_AUTOSIZE);
     cv::setMouseCallback("image", onMouse);
-    cv::createTrackbar("Class selection", "image", &selected, numClass-1, on_trackbar_class );
-    cv::createTrackbar("Allow Overwrite", "image", &overwrite, 1, on_trackbar_overwrite );
-    cv::createTrackbar("Optical Flow", "image", &optFlow, 1, on_trackbar_optflow );
-    cv::createTrackbar("Methods", "image", &method, 3, on_trackbar_flood );
-    cv::createTrackbar("Thickness/Count", "image", &thickness, 9, on_trackbar_thickness );
+    if (!horizonMode) {
+        cv::createTrackbar("Class selection", "image", &selected, numClass-1, on_trackbar_class );
+        cv::createTrackbar("Allow Overwrite", "image", &overwrite, 1, on_trackbar_overwrite );
+        cv::createTrackbar("Optical Flow", "image", &optFlow, 1, on_trackbar_optflow );
+        cv::createTrackbar("Methods", "image", &method, 3, on_trackbar_flood );
+        cv::createTrackbar("Thickness/Count", "image", &thickness, 9, on_trackbar_thickness );
+    } else {
+        selected = 0;
+        overwrite = 0;
+        optFlow = 0;
+        method = 1;
+        thickness = 1;
+    }
     
     //std::vector<std::string> names = {"106."};
     
@@ -785,18 +623,31 @@ int main(int argc, char *argv[])
         
         disp = cv::Mat(image.rows+325, image.cols*2, CV_8UC3, cv::Scalar(0) );
         disp(cv::Rect(0,image.rows, image.cols*2, 325)) = cv::Scalar(255,255,255);
-        cv::putText(disp, "Use the class selection slider to select the class to mark on the image:", cv::Point(10, image.rows +25), cv::FONT_HERSHEY_COMPLEX_SMALL, 1, cv::Scalar(0,0,0));
-        cv::putText(disp, "0 - background; 1 - ball; 2 - robot; 3 - goalpost; 4 - field line", cv::Point(50, image.rows +50), cv::FONT_HERSHEY_COMPLEX_SMALL, 1, cv::Scalar(0,0,0));
-        cv::putText(disp, "Use the methods slider to set the segmentation method:", cv::Point(10, image.rows +75), cv::FONT_HERSHEY_COMPLEX_SMALL, 1, cv::Scalar(0,0,0));
-        cv::putText(disp, "0 - use superpixels; 1 - line tool; 2 - square brush; 3 - circular brush", cv::Point(50, image.rows +100), cv::FONT_HERSHEY_COMPLEX_SMALL, 1, cv::Scalar(0,0,0));
-        cv::putText(disp, "The superpixel count slider can make the superpixels more fine or coarse.", cv::Point(10, image.rows +125), cv::FONT_HERSHEY_COMPLEX_SMALL, 1, cv::Scalar(0,0,0));
-        cv::putText(disp, "The thickness/size slider sets the thickness of the line or the size of the brush.", cv::Point(10, image.rows +150), cv::FONT_HERSHEY_COMPLEX_SMALL, 1, cv::Scalar(0,0,0));
-        cv::putText(disp, "By disabling overwrite, the tools will only change background pixels.", cv::Point(10, image.rows +175), cv::FONT_HERSHEY_COMPLEX_SMALL, 1, cv::Scalar(0,0,0));
-        cv::putText(disp, "By enabling optical flow, the program will try to infere the labels for the next image.", cv::Point(10, image.rows +200), cv::FONT_HERSHEY_COMPLEX_SMALL, 1, cv::Scalar(0,0,0));
-        cv::putText(disp, "Key commands:", cv::Point(10, image.rows +225), cv::FONT_HERSHEY_COMPLEX_SMALL, 1, cv::Scalar(0,0,0));
-        cv::putText(disp, "n - go to the next image without saving;       q - Quit         Esc - reset segmentation", cv::Point(50, image.rows +250), cv::FONT_HERSHEY_COMPLEX_SMALL, 1, cv::Scalar(0,0,0));
-        cv::putText(disp, "Enter - save segmentation and go to the next image;            c - clear lines", cv::Point(50, image.rows +275), cv::FONT_HERSHEY_COMPLEX_SMALL, 1, cv::Scalar(0,0,0));
-        cv::putText(disp, "f - draw polygon determined by the lines;                        d - draw lines;", cv::Point(50, image.rows +300), cv::FONT_HERSHEY_COMPLEX_SMALL, 1, cv::Scalar(0,0,0));
+        if(!horizonMode)
+        {
+            cv::putText(disp, "Use the class selection slider to select the class to mark on the image:", cv::Point(10, image.rows +25), cv::FONT_HERSHEY_COMPLEX_SMALL, 1, cv::Scalar(0,0,0));
+            cv::putText(disp, "0 - background; 1 - ball; 2 - robot; 3 - goalpost; 4 - field line", cv::Point(50, image.rows +50), cv::FONT_HERSHEY_COMPLEX_SMALL, 1, cv::Scalar(0,0,0));
+            cv::putText(disp, "Use the methods slider to set the segmentation method:", cv::Point(10, image.rows +75), cv::FONT_HERSHEY_COMPLEX_SMALL, 1, cv::Scalar(0,0,0));
+            cv::putText(disp, "0 - use superpixels; 1 - line tool; 2 - square brush; 3 - circular brush", cv::Point(50, image.rows +100), cv::FONT_HERSHEY_COMPLEX_SMALL, 1, cv::Scalar(0,0,0));
+            cv::putText(disp, "The superpixel count slider can make the superpixels more fine or coarse.", cv::Point(10, image.rows +125), cv::FONT_HERSHEY_COMPLEX_SMALL, 1, cv::Scalar(0,0,0));
+            cv::putText(disp, "The thickness/size slider sets the thickness of the line or the size of the brush.", cv::Point(10, image.rows +150), cv::FONT_HERSHEY_COMPLEX_SMALL, 1, cv::Scalar(0,0,0));
+            cv::putText(disp, "By disabling overwrite, the tools will only change background pixels.", cv::Point(10, image.rows +175), cv::FONT_HERSHEY_COMPLEX_SMALL, 1, cv::Scalar(0,0,0));
+            cv::putText(disp, "By enabling optical flow, the program will try to infere the labels for the next image.", cv::Point(10, image.rows +200), cv::FONT_HERSHEY_COMPLEX_SMALL, 1, cv::Scalar(0,0,0));
+            cv::putText(disp, "Key commands:", cv::Point(10, image.rows +225), cv::FONT_HERSHEY_COMPLEX_SMALL, 1, cv::Scalar(0,0,0));
+            cv::putText(disp, "n - go to the next image without saving;       q - Quit         Esc - reset segmentation", cv::Point(50, image.rows +250), cv::FONT_HERSHEY_COMPLEX_SMALL, 1, cv::Scalar(0,0,0));
+            cv::putText(disp, "Enter - save segmentation and go to the next image;            c - clear lines", cv::Point(50, image.rows +275), cv::FONT_HERSHEY_COMPLEX_SMALL, 1, cv::Scalar(0,0,0));
+            cv::putText(disp, "f - draw polygon determined by the lines;                        d - draw lines;", cv::Point(50, image.rows +300), cv::FONT_HERSHEY_COMPLEX_SMALL, 1, cv::Scalar(0,0,0));
+        } else
+        {
+            cv::putText(disp, "Use the mouse to click horizon points: The first 2 or 3 points will be used (signle or double horizon", cv::Point(10, image.rows +25), cv::FONT_HERSHEY_COMPLEX_SMALL, 1, cv::Scalar(0,0,0));
+            cv::putText(disp, "Key commands:", cv::Point(10, image.rows +50), cv::FONT_HERSHEY_COMPLEX_SMALL, 1, cv::Scalar(0,0,0));
+            cv::putText(disp, "q - Quit", cv::Point(50, image.rows +75), cv::FONT_HERSHEY_COMPLEX_SMALL, 1, cv::Scalar(0,0,0));
+            cv::putText(disp, "n - Go to next image without saving", cv::Point(50, image.rows +100), cv::FONT_HERSHEY_COMPLEX_SMALL, 1, cv::Scalar(0,0,0));
+            cv::putText(disp, "c - clear lines", cv::Point(50, image.rows +125), cv::FONT_HERSHEY_COMPLEX_SMALL, 1, cv::Scalar(0,0,0));
+            cv::putText(disp, "h - Remove field area outside horizon", cv::Point(50, image.rows +150), cv::FONT_HERSHEY_COMPLEX_SMALL, 1, cv::Scalar(0,0,0));
+            cv::putText(disp, "Enter after pressing h - Save image with horizon removed", cv::Point(50, image.rows +175), cv::FONT_HERSHEY_COMPLEX_SMALL, 1, cv::Scalar(0,0,0));
+            cv::putText(disp, "g before or after pressing h - Save image with no horizon", cv::Point(50, image.rows +200), cv::FONT_HERSHEY_COMPLEX_SMALL, 1, cv::Scalar(0,0,0));
+        }
         
         maskDisp = disp(cv::Rect(image.cols,0,image.cols,image.rows));
         for( int i = 0; i < mask.rows; i++)
@@ -813,98 +664,121 @@ int main(int argc, char *argv[])
             char c = cv::waitKey(1000);
             bool finished = false;
             
-            switch (c) {
-                case 13:
-                    cv::imwrite(saveDirMask.string() + fs::change_extension(fName, "png").filename().string(), mask);
-                    //cv::imwrite(saveDirMask.string() + std::to_string(cntr) + ".png", mask);
-                    //cv::imwrite(imageDir.string() + std::to_string(cntr) + ".png", image);
-                    // Break missing on purpose
-                case 'n':
-                    if (optFlow) {
-                        cv::cvtColor(image, prevImage, cv::COLOR_BGR2GRAY);
-                        mask.copyTo(prevMask);
-                    }
-                    cntr++;
-                    finished = true;
-                    break;
-                case 27:
-                    mask = cv::Mat(image.size(), CV_8UC1, cv::Scalar(0) );
-                    disp(cv::Rect(0,0,image.cols*2, image.rows)) = cv::Scalar(0);
-                    maskDisp = disp(cv::Rect(image.cols,0,image.cols,image.rows));
-                    imageDisp = disp(cv::Rect(0,0,image.cols,image.rows));
-                    showImages();
-                    break;
-                case 'h':
-                    cv::cvtColor(image, hsv, cv::COLOR_BGR2HSV);
-                    cv::inRange(hsv, cv::Scalar(0,10,40), cv::Scalar(100,150,150), green);
-                    elem = cv::getStructuringElement(cv::MORPH_RECT, cv::Size(5,5));
-                    cv::dilate(green, green, elem);
-                    cv::inRange(hsv, cv::Scalar(0,0,150), cv::Scalar(255,30,255), white);
-                    cv::morphologyEx(white, white, cv::MORPH_CLOSE, elem);
-                    cv::imshow("white", green);
-                    FindHorizon(image);
-                    showImages();
-                    if( cv::waitKey() != 13 )
-                    {
-                        image = cv::imread(fName);
-                        mask = cv::imread(maskFile.string(), cv::IMREAD_GRAYSCALE);
-                    }
-                    // break missing on purpose
-                case 'g':
-                    cv::imwrite(horizonLabelPath.string() + fs::change_extension(fName, "png").filename().string(), mask);
-                    cv::imwrite(horizonImgPath.string() + fs::change_extension(fName, "png").filename().string(), image);
-                    finished = true;
-                    break;
-                case 'f':
-                    if (!pts.empty()) {
-                        std::vector< std::vector<cv::Point> > temp = {pts};
+            if (horizonMode) {
+                switch (c) {
+                    case 'n':
+                        if (optFlow) {
+                            cv::cvtColor(image, prevImage, cv::COLOR_BGR2GRAY);
+                            mask.copyTo(prevMask);
+                        }
+                        cntr++;
+                        finished = true;
+                        break;
+                    case 'h':
+                        /*cv::cvtColor(image, hsv, cv::COLOR_BGR2HSV);
+                        cv::inRange(hsv, cv::Scalar(0,10,40), cv::Scalar(100,150,150), green);
+                        elem = cv::getStructuringElement(cv::MORPH_RECT, cv::Size(5,5));
+                        cv::dilate(green, green, elem);
+                        cv::inRange(hsv, cv::Scalar(0,0,150), cv::Scalar(255,30,255), white);
+                        cv::morphologyEx(white, white, cv::MORPH_CLOSE, elem);
+                        cv::imshow("white", green);*/
+                        FindHorizon(image);
+                        showImages();
+                        if( cv::waitKey() != 13 )
+                        {
+                            image = cv::imread(fName);
+                            mask = cv::imread(maskFile.string(), cv::IMREAD_GRAYSCALE);
+                        }
+                        // break missing on purpose
+                    case 'g':
+                        cv::imwrite(horizonLabelPath.string() + fs::change_extension(fName, "png").filename().string(), mask);
+                        cv::imwrite(horizonImgPath.string() + fs::change_extension(fName, "png").filename().string(), image);
+                        finished = true;
+                        break;
+                    case 'c':
+                        pts.clear();
+                        showImages();
+                        break;
+                    case 'q':
+                        exit(0);
+                        break;
+                    default:
+                        break;
+                }
+            }
+            else {
+                switch (c) {
+                    case 13:
+                        cv::imwrite(saveDirMask.string() + fs::change_extension(fName, "png").filename().string(), mask);
+                        //cv::imwrite(saveDirMask.string() + std::to_string(cntr) + ".png", mask);
+                        //cv::imwrite(imageDir.string() + std::to_string(cntr) + ".png", image);
+                        // Break missing on purpose
+                    case 'n':
+                        if (optFlow) {
+                            cv::cvtColor(image, prevImage, cv::COLOR_BGR2GRAY);
+                            mask.copyTo(prevMask);
+                        }
+                        cntr++;
+                        finished = true;
+                        break;
+                    case 27:
+                        mask = cv::Mat(image.size(), CV_8UC1, cv::Scalar(0) );
+                        disp(cv::Rect(0,0,image.cols*2, image.rows)) = cv::Scalar(0);
+                        maskDisp = disp(cv::Rect(image.cols,0,image.cols,image.rows));
+                        imageDisp = disp(cv::Rect(0,0,image.cols,image.rows));
+                        showImages();
+                        break;
+                    case 'f':
+                        if (!pts.empty()) {
+                            std::vector< std::vector<cv::Point> > temp = {pts};
+                            if (!overwrite) {
+                                cv::Mat colourTemp(maskDisp.size(),CV_8UC3,colours[0]);
+                                cv::Mat labelTemp(mask.size(),CV_8UC1,selected-selected);
+                                cv::Mat copyMask = (mask == 0);
+                                cv::fillPoly(colourTemp, temp, colours[selected]);
+                                cv::fillPoly(labelTemp, temp, selected);
+                                colourTemp.copyTo(maskDisp, copyMask );
+                                labelTemp.copyTo(mask, copyMask);
+                            } else
+                            {
+                                cv::fillPoly(maskDisp, temp, colours[selected]);
+                                cv::fillPoly(mask, temp, selected);
+                            }
+                            pts.clear();
+                            showImages();
+                        }
+                        break;
+                    case 'd':
                         if (!overwrite) {
                             cv::Mat colourTemp(maskDisp.size(),CV_8UC3,colours[0]);
                             cv::Mat labelTemp(mask.size(),CV_8UC1,selected-selected);
                             cv::Mat copyMask = (mask == 0);
-                            cv::fillPoly(colourTemp, temp, colours[selected]);
-                            cv::fillPoly(labelTemp, temp, selected);
+                            for( int i = 0; !pts.empty() && i < pts.size()-1; i++)
+                            {
+                                cv::line(colourTemp, pts[i], pts[i+1], colours[selected], thickness+1);
+                                cv::line(labelTemp, pts[i], pts[i+1], selected, thickness+1);
+                            }
                             colourTemp.copyTo(maskDisp, copyMask );
                             labelTemp.copyTo(mask, copyMask);
                         } else
                         {
-                            cv::fillPoly(maskDisp, temp, colours[selected]);
-                            cv::fillPoly(mask, temp, selected);
+                            for( int i = 0; !pts.empty() && i < pts.size()-1; i++)
+                            {
+                                cv::line(maskDisp, pts[i], pts[i+1], colours[selected], thickness+1);
+                                cv::line(mask, pts[i], pts[i+1], selected, thickness+1);
+                            }
                         }
+                        // Break missing on purpose
+                    case 'c':
                         pts.clear();
                         showImages();
-                    }
-                    break;
-                case 'd':
-                    if (!overwrite) {
-                        cv::Mat colourTemp(maskDisp.size(),CV_8UC3,colours[0]);
-                        cv::Mat labelTemp(mask.size(),CV_8UC1,selected-selected);
-                        cv::Mat copyMask = (mask == 0);
-                        for( int i = 0; !pts.empty() && i < pts.size()-1; i++)
-                        {
-                            cv::line(colourTemp, pts[i], pts[i+1], colours[selected], thickness+1);
-                            cv::line(labelTemp, pts[i], pts[i+1], selected, thickness+1);
-                        }                        
-                        colourTemp.copyTo(maskDisp, copyMask );
-                        labelTemp.copyTo(mask, copyMask);
-                    } else
-                    {
-                        for( int i = 0; !pts.empty() && i < pts.size()-1; i++)
-                        {
-                            cv::line(maskDisp, pts[i], pts[i+1], colours[selected], thickness+1);
-                            cv::line(mask, pts[i], pts[i+1], selected, thickness+1);
-                        }
-                    }
-                    // Break missing on purpose
-                case 'c':
-                    pts.clear();
-                    showImages();
-                    break;
-                case 'q':
-                    exit(0);
-                    break;
-                default:
-                    break;
+                        break;
+                    case 'q':
+                        exit(0);
+                        break;
+                    default:
+                        break;
+                }
             }
             
             if( finished )
